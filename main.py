@@ -1,5 +1,4 @@
-def main():
-    print("Hello from droplet-impact-cv!")
+from droplet_impact_cv.analyze import main
 
 
 if __name__ == "__main__":
