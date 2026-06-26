@@ -24,7 +24,7 @@ uv run droplet-impact-cv path/to/tiff_frames \
   --fps 8000 \
   --pixel-size-mm 0.00711883341 \
   --surface-frame 61 \
-  -o outputs/spreading_diameter.csv
+  -o outputs/spreading_diameter.csv \
   --debug-every 1
 ```
 
