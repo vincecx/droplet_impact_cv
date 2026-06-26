@@ -23,10 +23,22 @@ Common overrides:
 uv run droplet-impact-cv path/to/tiff_frames \
   --fps 8000 \
   --pixel-size-mm 0.00711883341 \
-  --surface-y 687 \
-  --debug-dir outputs/debug_overlays \
+  --surface-frame 61 \
   -o outputs/spreading_diameter.csv
 ```
+
+Use `--surface-frame` when a frame shows clear symmetry between the droplet and
+its reflection. The detected waist between the droplet and its reflection is
+then used as the center height of a fixed surface line for the full sequence.
+The surface line is tilted `0.3` degrees counterclockwise from horizontal. Use
+`--surface-y` to manually override this calibration with the surface-line center
+pixel coordinate.
+
+The reported spreading diameter is the length of the liquid contour intersection
+with the fixed surface line.
+
+Debug overlays are written by default to `outputs/debug_overlays`. Use
+`--debug-dir` to choose a different directory.
 
 The CSV columns are:
 
