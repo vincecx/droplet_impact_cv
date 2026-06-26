@@ -25,12 +25,13 @@ uv run droplet-impact-cv path/to/tiff_frames \
   --pixel-size-mm 0.00711883341 \
   --surface-frame 61 \
   -o outputs/spreading_diameter.csv
+  --debug-every 1
 ```
 
 Use `--surface-frame` when a frame shows clear symmetry between the droplet and
 its reflection. The detected waist between the droplet and its reflection is
 then used as the center height of a fixed surface line for the full sequence.
-The surface line is tilted `0.3` degrees counterclockwise from horizontal. Use
+The surface line is tilted `0.4` degrees counterclockwise from horizontal. Use
 `--surface-y` to manually override this calibration with the surface-line center
 pixel coordinate.
 
