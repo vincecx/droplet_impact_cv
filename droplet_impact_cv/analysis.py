@@ -17,6 +17,7 @@ from .imaging import (
     touches_surface,
 )
 from .models import (
+    DEFAULT_THRESHOLD_SAMPLE_FRAMES,
     DEFAULT_SURFACE_ANGLE_DEG,
     AnalysisConfig,
     FrameMeasurement,
@@ -36,7 +37,7 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
         if not files:
             raise ValueError(f"No input frames found at or before frame {config.max_frame}")
     first_frame_number = frame_number_from_filename(files[0])
-    background = build_background(files, config.background_frames)
+    background = build_background(files)
     coarse_surface_y = estimate_surface_y(
         background,
         config.surface_search_start_px,
@@ -50,7 +51,7 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
             files,
             background,
             coarse_surface_y,
-            config.background_frames,
+            DEFAULT_THRESHOLD_SAMPLE_FRAMES,
             config.min_foreground_delta,
         )
     )
@@ -89,7 +90,7 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
             files,
             background,
             surface_y,
-            config.background_frames,
+            DEFAULT_THRESHOLD_SAMPLE_FRAMES,
             config.min_foreground_delta,
         )
     )

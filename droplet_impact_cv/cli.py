@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import math
+import shlex
+import sys
 from pathlib import Path
 
 from .analysis import analyze_sequence
@@ -12,6 +14,9 @@ from .models import (
     AnalysisConfig,
 )
 from .output import write_csv
+
+
+CONFIG_FILENAME = "cv_config.txt"
 
 
 def positive_float(value: str) -> float:
@@ -41,7 +46,11 @@ def default_output_dir(input_dir: Path) -> Path:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Measure droplet spreading diameter from high-speed TIFF sequences."
+        description=(
+            "Measure droplet spreading diameter from high-speed TIFF sequences. "
+            "Options in <input_dir>/cv_config.txt are loaded automatically; "
+            "explicit command-line options take precedence."
+        )
     )
     parser.add_argument(
         "input_dir",
@@ -75,12 +84,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=positive_float,
         default=DEFAULT_PIXEL_SIZE_MM,
         help="Physical length per pixel in mm. Default: 0.00711883341",
-    )
-    parser.add_argument(
-        "--background-frames",
-        type=int,
-        default=8,
-        help="Number of first frames used for median background.",
     )
     parser.add_argument(
         "--surface-y",
@@ -162,7 +165,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--include-pre-impact",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="Include frames before the detected impact frame in the CSV.",
     )
     parser.add_argument(
@@ -186,6 +190,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    command_line_args = parser.parse_args(raw_args)
+    config_path = command_line_args.input_dir / CONFIG_FILENAME
+    if not config_path.is_file():
+        return command_line_args
+
+    try:
+        config_tokens = shlex.split(
+            config_path.read_text(encoding="utf-8"),
+            comments=True,
+            posix=True,
+        )
+    except (OSError, UnicodeError, ValueError) as error:
+        parser.error(f"cannot read {config_path}: {error}")
+
+    if "-h" in config_tokens or "--help" in config_tokens:
+        parser.error(f"help options are not allowed in {config_path}")
+
+    # Supplying the already resolved input directory first also makes a stray
+    # positional value in the config file an argparse error. All remaining
+    # values from this parse become defaults for the final CLI parse.
+    config_args = parser.parse_args([str(command_line_args.input_dir), *config_tokens])
+    config_defaults = vars(config_args).copy()
+    config_defaults.pop("input_dir")
+    parser.set_defaults(**config_defaults)
+    return parser.parse_args(raw_args)
+
+
 def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
     output_dir = default_output_dir(args.input_dir)
     return AnalysisConfig(
@@ -193,7 +227,6 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         output_csv=args.output_csv or output_dir / "spreading_diameter.csv",
         fps=args.fps,
         pixel_size_mm=args.pixel_size_mm,
-        background_frames=args.background_frames,
         surface_y=args.surface_y,
         surface_frame=args.surface_frame,
         surface_angle_deg=args.surface_angle_deg,
@@ -215,8 +248,7 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parse_args(argv)
     config = config_from_args(args)
     measurements = analyze_sequence(config)
     write_csv(config.output_csv, measurements)

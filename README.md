@@ -9,11 +9,8 @@ extension. For example, `capture_000005.tif` is reported as frame 5 even when it
 is the first file in the input directory.
 
 The frame with the smallest frame number in the input folder is assumed to be a
-clean background image containing no droplet. By default, background estimation
-uses the median of this frame and the following seven frames; those additional
-frames should also avoid foreground that remains at the same location in most of
-the sampled images. Use `--background-frames` to change the number of sampled
-frames.
+clean background image containing no droplet and is used directly as the
+background for the full sequence.
 
 ## Usage
 
@@ -41,6 +38,20 @@ uv run droplet-impact-cv path/to/tiff_frames \
 
 Use `--max-frame 120` to process only files whose filename frame number is at
 most 120. If omitted, the full sequence is processed.
+
+The program automatically reads command-line-style options from
+`<input-folder>/cv_config.txt` when that file exists. Blank lines and comments
+starting with `#` are allowed. For example:
+
+```text
+--fps 4000
+--pixel-size-mm 0.01682736321
+--surface-frame 9105
+```
+
+Configuration precedence is: explicit command-line options, then
+`cv_config.txt`, then the defaults defined by the program. For example,
+`--fps 8000` on the command line overrides `--fps 4000` in `cv_config.txt`.
 
 Use `--surface-frame` when a frame shows clear symmetry between the droplet and
 its reflection. The two contact-line tips (or the concave vertices between split

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import cv2
 import numpy as np
+import tifffile
 
 from droplet_impact_cv.imaging import (
+    build_background,
     component_measurement,
     estimate_contact_line,
     estimate_vertical_symmetry_y,
@@ -20,6 +23,23 @@ from droplet_impact_cv.models import (
     AnalysisConfig,
     SurfaceLine,
 )
+
+
+class BackgroundTests(unittest.TestCase):
+    def test_background_uses_only_the_smallest_numbered_frame(self) -> None:
+        with TemporaryDirectory() as temporary_dir:
+            input_dir = Path(temporary_dir)
+            first = input_dir / "capture_000001.tif"
+            second = input_dir / "capture_000002.tif"
+            tifffile.imwrite(first, np.full((4, 5), 1000, dtype=np.uint16))
+            tifffile.imwrite(second, np.full((4, 5), 3000, dtype=np.uint16))
+
+            background = build_background([second, first])
+
+        np.testing.assert_array_equal(
+            background,
+            np.full((4, 5), 1000, dtype=np.float32),
+        )
 
 
 class ForegroundMaskTests(unittest.TestCase):

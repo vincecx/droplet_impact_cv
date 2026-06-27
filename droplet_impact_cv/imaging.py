@@ -59,12 +59,11 @@ def read_image(path: Path) -> np.ndarray:
     return image.astype(np.float32, copy=False)
 
 
-def build_background(files: list[Path], frame_count: int) -> np.ndarray:
-    if frame_count < 1:
-        raise ValueError("--background-frames must be at least 1")
-    selected = files[: min(frame_count, len(files))]
-    stack = np.stack([read_image(path) for path in selected], axis=0)
-    return np.median(stack, axis=0).astype(np.float32, copy=False)
+def build_background(files: list[Path]) -> np.ndarray:
+    if not files:
+        raise ValueError("At least one TIFF file is required to build the background")
+    background_file = min(files, key=frame_number_from_filename)
+    return read_image(background_file)
 
 
 def estimate_surface_y(background: np.ndarray, search_start_px: int, drop_delta: float) -> int:
@@ -86,10 +85,10 @@ def estimate_threshold(
     files: list[Path],
     background: np.ndarray,
     surface_y: int,
-    background_frames: int,
+    sample_frame_count: int,
     min_foreground_delta: float,
 ) -> float:
-    sample_files = files[: min(background_frames, len(files))]
+    sample_files = files[: min(sample_frame_count, len(files))]
     if len(sample_files) < 2:
         return min_foreground_delta
 

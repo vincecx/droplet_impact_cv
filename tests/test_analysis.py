@@ -24,7 +24,6 @@ class SequenceAnalysisTests(unittest.TestCase):
             config = AnalysisConfig(
                 input_dir=input_dir,
                 output_csv=input_dir / "output.csv",
-                background_frames=1,
                 surface_y=50,
                 max_frame=2,
                 debug_dir=None,
@@ -44,7 +43,6 @@ class SequenceAnalysisTests(unittest.TestCase):
             config = AnalysisConfig(
                 input_dir=input_dir,
                 output_csv=input_dir / "output.csv",
-                background_frames=1,
                 surface_y=50,
                 include_pre_impact=True,
                 time_zero="first-frame",
@@ -66,7 +64,6 @@ class SequenceAnalysisTests(unittest.TestCase):
             config = AnalysisConfig(
                 input_dir=input_dir,
                 output_csv=input_dir / "output.csv",
-                background_frames=1,
                 surface_y=50,
                 max_frame=6,
                 debug_dir=None,
