@@ -386,6 +386,111 @@ def select_calibration_component(
     return component, bbox
 
 
+def estimate_vertical_symmetry_y(
+    component: np.ndarray,
+    bbox: tuple[int, int, int, int],
+) -> tuple[int, float]:
+    """Estimate a horizontal symmetry axis from component row widths.
+
+    The surface calibration frame is expected to contain a droplet and its
+    reflection.  Comparing the upper and lower silhouette avoids relying on a
+    coarse background edge, which can identify a second substrate boundary
+    below the actual surface.
+    """
+    _x_min, y_min, _x_max, y_max = bbox
+    vertical_span = y_max - y_min + 1
+    if vertical_span < 5:
+        raise ValueError(
+            "Droplet/reflection component is too short for symmetry calibration"
+        )
+
+    widths = np.array(
+        [row_run_width(component, row_y) for row_y in range(y_min, y_max + 1)],
+        dtype=np.float32,
+    )
+    max_width = float(widths.max())
+    if max_width <= 0:
+        raise ValueError("No foreground rows found in symmetry calibration component")
+
+    quarter_span = max(1, vertical_span // 4)
+    center_start = y_min + quarter_span
+    center_stop = y_max - quarter_span
+    best_y = center_start
+    best_error = math.inf
+
+    for center_y in range(center_start, center_stop + 1):
+        center_index = center_y - y_min
+        half_span = min(center_y - y_min, y_max - center_y)
+        if half_span < 1:
+            continue
+
+        upper = widths[center_index - half_span : center_index]
+        lower = widths[center_index + 1 : center_index + half_span + 1][::-1]
+        silhouette_error = float(np.mean(np.abs(upper - lower))) / max_width
+        extent_error = abs((center_y - y_min) - (y_max - center_y)) / vertical_span
+        error = silhouette_error + extent_error
+        if error < best_error:
+            best_y = center_y
+            best_error = error
+
+    return best_y, best_error
+
+
+def select_symmetric_calibration_component(
+    mask: np.ndarray,
+    coarse_surface_y: int,
+    config: AnalysisConfig,
+) -> tuple[np.ndarray, tuple[int, int, int, int]] | None:
+    """Find a nearby component without requiring it to cross the coarse edge."""
+    labels, count = ndi.label(mask)
+    best: (
+        tuple[tuple[float, float, int], np.ndarray, tuple[int, int, int, int]]
+        | None
+    ) = None
+    max_edge_gap = max(
+        config.touch_above_surface_px,
+        4 * max(1, config.morphology_radius_px),
+    )
+    min_vertical_span = 2 * max(2, config.morphology_radius_px) + 1
+
+    for label in range(1, count + 1):
+        component = labels == label
+        area = int(component.sum())
+        if area < config.min_area_px:
+            continue
+
+        bbox = component_bbox(component)
+        if bbox is None:
+            continue
+        _x_min, y_min, _x_max, y_max = bbox
+        if y_max - y_min + 1 < min_vertical_span:
+            continue
+
+        if coarse_surface_y < y_min:
+            edge_gap = y_min - coarse_surface_y
+        elif coarse_surface_y > y_max:
+            edge_gap = coarse_surface_y - y_max
+        else:
+            edge_gap = 0
+        if edge_gap > max_edge_gap:
+            continue
+
+        symmetry_y, symmetry_error = estimate_vertical_symmetry_y(component, bbox)
+        min_side_area = min(config.min_area_px, max(1, area // 10))
+        above_area = int(component[:symmetry_y].sum())
+        below_area = int(component[symmetry_y + 1 :].sum())
+        if above_area < min_side_area or below_area < min_side_area:
+            continue
+
+        score = (float(edge_gap), symmetry_error, -area)
+        if best is None or score < best[0]:
+            best = (score, component, bbox)
+
+    if best is None:
+        return None
+    return best[1], best[2]
+
+
 def row_run_width(component: np.ndarray, row_y: int) -> int:
     bounds = longest_true_run(component[row_y])
     if bounds is None:
@@ -451,9 +556,15 @@ def estimate_surface_y_from_symmetry_frame(
     mask = full_foreground_mask(image, background, threshold, structure)
     selected = select_calibration_component(mask, coarse_surface_y, config)
     if selected is None:
-        raise ValueError(
-            f"Could not find a droplet/reflection component in surface calibration frame {frame_number}"
-        )
+        selected = select_symmetric_calibration_component(mask, coarse_surface_y, config)
+        if selected is None:
+            raise ValueError(
+                "Could not find a droplet/reflection component in surface "
+                f"calibration frame {frame_number}"
+            )
+        component, bbox = selected
+        surface_y, _error = estimate_vertical_symmetry_y(component, bbox)
+        return surface_y
 
     component, bbox = selected
     return estimate_surface_y_from_waist(component, bbox, coarse_surface_y, config)

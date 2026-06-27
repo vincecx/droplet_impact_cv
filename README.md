@@ -8,6 +8,13 @@ Each TIFF filename must end with a six-digit frame number immediately before the
 extension. For example, `capture_000005.tif` is reported as frame 5 even when it
 is the first file in the input directory.
 
+The frame with the smallest frame number in the input folder is assumed to be a
+clean background image containing no droplet. By default, background estimation
+uses the median of this frame and the following seven frames; those additional
+frames should also avoid foreground that remains at the same location in most of
+the sampled images. Use `--background-frames` to change the number of sampled
+frames.
+
 ## Usage
 
 The project uses `uv` for dependency and environment management.

@@ -6,7 +6,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from droplet_impact_cv.imaging import component_measurement, foreground_mask, make_structure
+from droplet_impact_cv.imaging import (
+    component_measurement,
+    estimate_vertical_symmetry_y,
+    foreground_mask,
+    make_structure,
+    select_calibration_component,
+    select_symmetric_calibration_component,
+)
 from droplet_impact_cv.models import (
     DEFAULT_MIN_FOREGROUND_DELTA,
     AnalysisConfig,
@@ -87,6 +94,32 @@ class ComponentMeasurementTests(unittest.TestCase):
 
         self.assertEqual(measurement.diameter_px, 60.0)
         self.assertTrue(measurement.mask[50, 50])
+
+
+class SurfaceCalibrationTests(unittest.TestCase):
+    def test_symmetric_component_can_be_selected_above_wrong_coarse_edge(self) -> None:
+        mask = np.zeros((100, 120), dtype=np.uint8)
+        for offset in range(-20, 21):
+            half_width = 25 - abs(offset) // 2
+            mask[40 + offset, 60 - half_width : 61 + half_width] = 1
+        config = AnalysisConfig(
+            input_dir=Path("input"),
+            output_csv=Path("output.csv"),
+            min_area_px=100,
+            morphology_radius_px=1,
+            debug_dir=None,
+        )
+
+        strict_selection = select_calibration_component(mask, 70, config)
+        symmetric_selection = select_symmetric_calibration_component(mask, 70, config)
+
+        self.assertIsNone(strict_selection)
+        self.assertIsNotNone(symmetric_selection)
+        assert symmetric_selection is not None
+        component, bbox = symmetric_selection
+        surface_y, symmetry_error = estimate_vertical_symmetry_y(component, bbox)
+        self.assertEqual(surface_y, 40)
+        self.assertAlmostEqual(symmetry_error, 0.0)
 
 
 if __name__ == "__main__":
