@@ -39,7 +39,8 @@ full sequence is processed.
 Use `--surface-frame` when a frame shows clear symmetry between the droplet and
 its reflection. The detected waist between the droplet and its reflection is
 then used as the center height of a fixed surface line for the full sequence.
-The surface line is tilted `0.4` degrees counterclockwise from horizontal. Use
+Surface angles are measured clockwise from horizontal, with a default of `-0.5`
+degrees (that is, `0.5` degrees counterclockwise). Use
 `--surface-y` to manually override this calibration with the surface-line center
 pixel coordinate.
 

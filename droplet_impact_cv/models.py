@@ -9,7 +9,7 @@ import numpy as np
 
 DEFAULT_FPS = 8000.0
 DEFAULT_PIXEL_SIZE_MM = 0.00711883341
-DEFAULT_SURFACE_ANGLE_DEG = 0.4
+DEFAULT_SURFACE_ANGLE_DEG = -0.5
 DEFAULT_MIN_FOREGROUND_DELTA = 700.0
 
 
@@ -71,8 +71,8 @@ class SurfaceLine:
 
     @property
     def slope(self) -> float:
-        # Image y increases downward. A visually counterclockwise line therefore has negative dy/dx.
-        return -math.tan(math.radians(self.angle_deg))
+        # Image y increases downward, so positive dy/dx is visually clockwise.
+        return math.tan(math.radians(self.angle_deg))
 
     def y_at(self, x: np.ndarray | float, width: int) -> np.ndarray | float:
         center_x = (width - 1) / 2.0
