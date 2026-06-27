@@ -66,3 +66,22 @@ The CSV columns are:
 By default, `time_ms = 0` at the automatically detected impact frame and
 pre-impact rows are omitted. Use `--include-pre-impact` to keep all frames, or
 `--time-zero first-frame` to report time from the first image.
+
+## Project structure
+
+- `droplet_impact_cv/cli.py`: command-line parsing and entry point
+- `droplet_impact_cv/models.py`: configuration and result data models
+- `droplet_impact_cv/imaging.py`: TIFF loading, segmentation, and surface calibration
+- `droplet_impact_cv/analysis.py`: sequence-level analysis workflow
+- `droplet_impact_cv/visualization.py`: debug overlay rendering
+- `droplet_impact_cv/output.py`: CSV serialization
+- `tests/`: unit tests grouped by the module under test
+
+## Development
+
+Synchronize the environment and run the test suite with:
+
+```bash
+uv sync
+uv run python -m unittest discover -v
+```

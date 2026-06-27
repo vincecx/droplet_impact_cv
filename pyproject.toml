@@ -1,7 +1,7 @@
 [project]
 name = "droplet-impact-cv"
 version = "0.1.0"
-description = "Add your description here"
+description = "Measure droplet spreading diameter from high-speed side-view TIFF sequences"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-droplet-impact-cv = "droplet_impact_cv.analyze:main"
+droplet-impact-cv = "droplet_impact_cv.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
