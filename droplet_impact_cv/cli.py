@@ -68,10 +68,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output CSV path. Default: outputs/<input-folder>/spreading_diameter.csv",
     )
     parser.add_argument(
-        "--max-frame",
+        "--start-frame",
         type=positive_int,
         default=None,
-        help="Only process frames up to this 1-based frame number (inclusive). Default: no limit.",
+        help=(
+            "Only process frames from this filename frame number (inclusive). "
+            "Default: no lower limit."
+        ),
+    )
+    parser.add_argument(
+        "--end-frame",
+        type=positive_int,
+        default=None,
+        help=(
+            "Only process frames up to this filename frame number (inclusive). "
+            "Default: no upper limit."
+        ),
     )
     parser.add_argument(
         "--fps",
@@ -243,7 +255,8 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         time_zero=args.time_zero,
         debug_dir=args.debug_dir or output_dir / "debug_overlays",
         debug_every=args.debug_every,
-        max_frame=args.max_frame,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
     )
 
 

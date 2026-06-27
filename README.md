@@ -36,8 +36,10 @@ uv run droplet-impact-cv path/to/tiff_frames \
   --debug-every 1
 ```
 
-Use `--max-frame 120` to process only files whose filename frame number is at
-most 120. If omitted, the full sequence is processed.
+Use `--start-frame 20 --end-frame 120` to process only files whose six-digit
+filename frame number is in the inclusive range 20 through 120. Either option
+can be omitted to leave that side of the range unbounded. When `--start-frame`
+is specified, the first frame in the selected range is used as the background.
 
 The program automatically reads command-line-style options from
 `<input-folder>/cv_config.txt` when that file exists. Blank lines and comments

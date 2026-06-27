@@ -38,7 +38,8 @@ class AnalysisConfig:
     time_zero: str = "impact"
     debug_dir: Path | None = Path("outputs/debug_overlays")
     debug_every: int = 25
-    max_frame: int | None = None
+    start_frame: int | None = None
+    end_frame: int | None = None
 
 
 @dataclass(frozen=True)

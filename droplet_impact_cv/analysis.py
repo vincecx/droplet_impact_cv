@@ -27,15 +27,35 @@ from .visualization import write_debug_overlay
 
 
 def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
-    files = find_tiff_files(config.input_dir)
-    if config.max_frame is not None:
-        if config.max_frame < 1:
-            raise ValueError("max_frame must be at least 1")
-        files = [
-            path for path in files if frame_number_from_filename(path) <= config.max_frame
-        ]
+    all_files = find_tiff_files(config.input_dir)
+    if config.start_frame is not None and config.start_frame < 1:
+        raise ValueError("start_frame must be at least 1")
+    if config.end_frame is not None and config.end_frame < 1:
+        raise ValueError("end_frame must be at least 1")
+    if (
+        config.start_frame is not None
+        and config.end_frame is not None
+        and config.start_frame > config.end_frame
+    ):
+        raise ValueError("start_frame must be less than or equal to end_frame")
+
+    files = all_files
+    if config.start_frame is not None or config.end_frame is not None:
+        files_in_range = []
+        for path in files:
+            frame_number = frame_number_from_filename(path)
+            after_start = config.start_frame is None or frame_number >= config.start_frame
+            before_end = config.end_frame is None or frame_number <= config.end_frame
+            if after_start and before_end:
+                files_in_range.append(path)
+        files = files_in_range
         if not files:
-            raise ValueError(f"No input frames found at or before frame {config.max_frame}")
+            bounds = []
+            if config.start_frame is not None:
+                bounds.append(f"at or after frame {config.start_frame}")
+            if config.end_frame is not None:
+                bounds.append(f"at or before frame {config.end_frame}")
+            raise ValueError(f"No input frames found {' and '.join(bounds)}")
     first_frame_number = frame_number_from_filename(files[0])
     background = build_background(files)
     coarse_surface_y = estimate_surface_y(
