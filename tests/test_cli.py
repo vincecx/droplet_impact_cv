@@ -29,7 +29,7 @@ class CliConfigTests(unittest.TestCase):
     def test_default_foreground_delta_rejects_weak_shadow(self) -> None:
         config = config_from_args(build_parser().parse_args([]))
         self.assertEqual(config.min_foreground_delta, DEFAULT_MIN_FOREGROUND_DELTA)
-        self.assertEqual(config.min_foreground_delta, 700.0)
+        self.assertEqual(config.min_foreground_delta, 1500.0)
 
 
 if __name__ == "__main__":

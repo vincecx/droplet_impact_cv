@@ -105,7 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-foreground-delta",
         type=positive_float,
         default=DEFAULT_MIN_FOREGROUND_DELTA,
-        help="Lower bound for automatic threshold. Default: 700",
+        help="Lower bound for automatic threshold. Default: 1500",
     )
     parser.add_argument(
         "--min-area-px",
