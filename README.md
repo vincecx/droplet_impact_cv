@@ -4,6 +4,10 @@ Automated side-view image analysis for droplet impact sequences. The CLI reads
 16-bit grayscale TIFF frames, detects the substrate surface and impact frame, then
 exports droplet spreading diameter as a function of time.
 
+Each TIFF filename must end with a six-digit frame number immediately before the
+extension. For example, `capture_000005.tif` is reported as frame 5 even when it
+is the first file in the input directory.
+
 ## Usage
 
 The project uses `uv` for dependency and environment management.
@@ -28,8 +32,8 @@ uv run droplet-impact-cv path/to/tiff_frames \
   --debug-every 1
 ```
 
-Use `--max-frame 120` to process only frames 1 through 120. If omitted, the
-full sequence is processed.
+Use `--max-frame 120` to process only files whose filename frame number is at
+most 120. If omitted, the full sequence is processed.
 
 Use `--surface-frame` when a frame shows clear symmetry between the droplet and
 its reflection. The detected waist between the droplet and its reflection is

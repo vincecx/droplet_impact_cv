@@ -13,6 +13,7 @@ from .models import AnalysisConfig, ComponentMeasurement, SurfaceLine
 
 
 SURFACE_MASK_BELOW_TOLERANCE_PX = 4
+FRAME_NUMBER_PATTERN = re.compile(r"(?<!\d)(\d{6})$")
 
 
 def natural_sort_key(path: Path) -> list[int | str]:
@@ -20,13 +21,34 @@ def natural_sort_key(path: Path) -> list[int | str]:
     return [int(part) if part.isdigit() else part.lower() for part in parts]
 
 
+def frame_number_from_filename(path: Path) -> int:
+    match = FRAME_NUMBER_PATTERN.search(path.stem)
+    if match is None:
+        raise ValueError(
+            f"TIFF filename must end with a six-digit frame number: {path.name}"
+        )
+    return int(match.group(1))
+
+
 def find_tiff_files(input_dir: Path) -> list[Path]:
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
-    files = sorted([*input_dir.glob("*.tif"), *input_dir.glob("*.tiff")], key=natural_sort_key)
+    files = [*input_dir.glob("*.tif"), *input_dir.glob("*.tiff")]
     if not files:
         raise FileNotFoundError(f"No .tif or .tiff images found in: {input_dir}")
-    return files
+
+    numbered_files = sorted(
+        ((frame_number_from_filename(path), path) for path in files),
+        key=lambda item: (item[0], natural_sort_key(item[1])),
+    )
+    for (frame_number, first), (next_frame_number, second) in zip(
+        numbered_files, numbered_files[1:]
+    ):
+        if frame_number == next_frame_number:
+            raise ValueError(
+                f"Duplicate frame number {frame_number:06d}: {first.name}, {second.name}"
+            )
+    return [path for _, path in numbered_files]
 
 
 def read_image(path: Path) -> np.ndarray:
@@ -418,10 +440,14 @@ def estimate_surface_y_from_symmetry_frame(
     config: AnalysisConfig,
     structure: np.ndarray,
 ) -> int:
-    if frame_number < 1 or frame_number > len(files):
-        raise ValueError(f"--surface-frame must be between 1 and {len(files)}, got {frame_number}")
+    matching_file = next(
+        (path for path in files if frame_number_from_filename(path) == frame_number),
+        None,
+    )
+    if matching_file is None:
+        raise ValueError(f"--surface-frame {frame_number} does not exist in the input sequence")
 
-    image = read_image(files[frame_number - 1])
+    image = read_image(matching_file)
     mask = full_foreground_mask(image, background, threshold, structure)
     selected = select_calibration_component(mask, coarse_surface_y, config)
     if selected is None:

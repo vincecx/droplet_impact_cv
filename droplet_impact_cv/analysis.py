@@ -10,6 +10,7 @@ from .imaging import (
     estimate_surface_y_from_symmetry_frame,
     estimate_threshold,
     find_tiff_files,
+    frame_number_from_filename,
     foreground_mask,
     make_structure,
     read_image,
@@ -24,7 +25,12 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
     if config.max_frame is not None:
         if config.max_frame < 1:
             raise ValueError("max_frame must be at least 1")
-        files = files[: config.max_frame]
+        files = [
+            path for path in files if frame_number_from_filename(path) <= config.max_frame
+        ]
+        if not files:
+            raise ValueError(f"No input frames found at or before frame {config.max_frame}")
+    first_frame_number = frame_number_from_filename(files[0])
     background = build_background(files, config.background_frames)
     coarse_surface_y = estimate_surface_y(
         background,
@@ -74,7 +80,8 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
     pending: list[tuple[int, Path, float, int]] = []
     impact_frame: int | None = None
 
-    for frame_number, file_path in enumerate(files, start=1):
+    for file_path in files:
+        frame_number = frame_number_from_filename(file_path)
         image = read_image(file_path)
         mask = foreground_mask(image, background, surface_line, threshold, config, structure)
         measurement = component_measurement(mask, surface_line, config)
@@ -91,7 +98,7 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
         )
 
         if config.debug_dir is not None and (
-            frame_number == 1
+            frame_number == first_frame_number
             or frame_number % config.debug_every == 0
             or (is_touching and abs(frame_number - (impact_frame or frame_number)) <= 2)
         ):
@@ -114,11 +121,11 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
     measurements: list[FrameMeasurement] = []
     for frame_number, file_path, diameter_px, area in pending:
         if impact_frame is None:
-            frame_offset = frame_number - 1
+            frame_offset = frame_number - first_frame_number
         elif config.time_zero == "impact":
             frame_offset = frame_number - impact_frame
         else:
-            frame_offset = frame_number - 1
+            frame_offset = frame_number - first_frame_number
 
         if not config.include_pre_impact and impact_frame is not None and frame_number < impact_frame:
             continue
