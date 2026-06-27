@@ -17,6 +17,7 @@ from scipy import ndimage as ndi
 DEFAULT_FPS = 8000.0
 DEFAULT_PIXEL_SIZE_MM = 0.00711883341
 DEFAULT_SURFACE_ANGLE_DEG = 0.4
+DEFAULT_MIN_FOREGROUND_DELTA = 700.0
 DEBUG_MASK_ALPHA = 0.2
 SURFACE_MASK_BELOW_TOLERANCE_PX = 4
 
@@ -32,7 +33,7 @@ class AnalysisConfig:
     surface_frame: int | None = None
     surface_angle_deg: float = DEFAULT_SURFACE_ANGLE_DEG
     threshold: float | None = None
-    min_foreground_delta: float = 120.0
+    min_foreground_delta: float = DEFAULT_MIN_FOREGROUND_DELTA
     min_area_px: int = 250
     morphology_radius_px: int = 3
     surface_search_start_px: int = 50
@@ -46,6 +47,7 @@ class AnalysisConfig:
     time_zero: str = "impact"
     debug_dir: Path | None = Path("outputs/debug_overlays")
     debug_every: int = 25
+    max_frame: int | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,9 @@ class FrameMeasurement:
     component_area_px: int
     surface_y: int
     impact_frame: int | None
+    fps: float
+    pixel_size_mm: float
+    surface_frame: int | None
 
 
 @dataclass(frozen=True)
@@ -213,35 +218,6 @@ def largest_component(mask: np.ndarray, min_area_px: int) -> np.ndarray:
     return labels == best_label
 
 
-def simplify_mask_contour(mask: np.ndarray, min_area_px: int) -> np.ndarray:
-    contours, _hierarchy = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    if not contours:
-        return mask
-
-    contour = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(contour) < min_area_px:
-        return mask
-
-    epsilon = max(2.0, 0.006 * cv2.arcLength(contour, True))
-    simplified = cv2.approxPolyDP(contour, epsilon, True)
-    output = np.zeros(mask.shape, dtype=np.uint8)
-    cv2.drawContours(output, [simplified], -1, 1, thickness=cv2.FILLED)
-    return output.astype(bool)
-
-
-def smooth_component(component: np.ndarray, config: AnalysisConfig) -> np.ndarray:
-    radius = max(3, config.morphology_radius_px + 2)
-    structure = make_structure(radius)
-    cleaned = cv2.morphologyEx(component.astype(np.uint8), cv2.MORPH_CLOSE, structure)
-    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, structure)
-    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, structure)
-    cleaned = ndi.binary_fill_holes(cleaned > 0)
-    largest = largest_component(cleaned, config.min_area_px)
-    if not largest.any():
-        return component
-    return simplify_mask_contour(largest, config.min_area_px)
-
-
 def component_bbox(component: np.ndarray) -> tuple[int, int, int, int] | None:
     ys, xs = np.nonzero(component)
     if len(xs) == 0:
@@ -321,12 +297,6 @@ def surface_band_mask(shape: tuple[int, int], surface_line: SurfaceLine, below_t
     return distance_from_surface <= below_tolerance_px
 
 
-def surface_intersection_band_mask(shape: tuple[int, int], surface_line: SurfaceLine, half_width_px: int) -> np.ndarray:
-    yy, xx = np.indices(shape)
-    distance_from_surface = np.abs(yy - surface_line.y_at(xx, shape[1]))
-    return distance_from_surface <= half_width_px
-
-
 def spreading_profile_on_surface(
     component: np.ndarray,
     surface_line: SurfaceLine,
@@ -352,11 +322,12 @@ def component_measurement(
     if area == 0:
         return ComponentMeasurement(math.nan, 0, None, component)
 
-    component = smooth_component(component, config)
+    # Keep the measured contour tied to foreground pixels. Polygon approximation
+    # can cut across concave edges or extend beyond the actual liquid boundary.
     component &= surface_band_mask(component.shape, surface_line, SURFACE_MASK_BELOW_TOLERANCE_PX)
-    intersection_band = component & surface_intersection_band_mask(component.shape, surface_line, half_width_px=2)
-    component = smooth_component(component, config)
-    component |= intersection_band
+    clipped_component = largest_component(component, config.min_area_px)
+    if clipped_component.any():
+        component = clipped_component
     area = int(component.sum())
     profile = spreading_profile_on_surface(component, surface_line)
     bounds = longest_true_run(profile)
@@ -508,13 +479,26 @@ def write_debug_overlay(
         x0, y0, x1, y1 = bbox
         cv2.line(overlay, (x0, y0), (x1, y1), (0, 255, 0), 2)
     text = f"frame={frame_number} diameter_mm={diameter_mm:.4f}"
-    cv2.putText(overlay, text, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(
+        overlay,
+        text,
+        (12, 28),
+        cv2.FONT_HERSHEY_DUPLEX,
+        0.7,
+        (0, 255, 0),
+        1,
+        cv2.LINE_AA,
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(path), overlay)
 
 
 def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
     files = find_tiff_files(config.input_dir)
+    if config.max_frame is not None:
+        if config.max_frame < 1:
+            raise ValueError("max_frame must be at least 1")
+        files = files[: config.max_frame]
     background = build_background(files, config.background_frames)
     coarse_surface_y = estimate_surface_y(background, config.surface_search_start_px, config.surface_drop_delta)
     structure = make_structure(config.morphology_radius_px)
@@ -610,6 +594,9 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
                 component_area_px=area,
                 surface_y=surface_line.center_y_int(),
                 impact_frame=impact_frame,
+                fps=config.fps,
+                pixel_size_mm=config.pixel_size_mm,
+                surface_frame=config.surface_frame,
             )
         )
 
@@ -622,27 +609,33 @@ def write_csv(path: Path, measurements: Iterable[FrameMeasurement]) -> None:
         writer = csv.writer(handle)
         writer.writerow(
             [
-                "frame",
                 "filename",
+                "frame",
                 "time_ms",
                 "diameter_px",
                 "diameter_mm",
-                "component_area_px",
-                "surface_y_px",
                 "impact_frame",
+                "surface_y_px",
+                "component_area_px",
+                "fps",
+                "pixel-size-mm",
+                "surface-frame",
             ]
         )
         for row in measurements:
             writer.writerow(
                 [
-                    row.frame_number,
                     row.filename,
+                    row.frame_number,
                     f"{row.time_ms:.6f}",
                     "" if math.isnan(row.diameter_px) else f"{row.diameter_px:.3f}",
                     "" if math.isnan(row.diameter_mm) else f"{row.diameter_mm:.9f}",
-                    row.component_area_px,
-                    row.surface_y,
                     "" if row.impact_frame is None else row.impact_frame,
+                    row.surface_y,
+                    row.component_area_px,
+                    row.fps,
+                    row.pixel_size_mm,
+                    "" if row.surface_frame is None else row.surface_frame,
                 ]
             )
 
@@ -661,6 +654,17 @@ def nonnegative_int(value: str) -> int:
     return parsed
 
 
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be at least 1")
+    return parsed
+
+
+def default_output_dir(input_dir: Path) -> Path:
+    return Path("outputs") / input_dir.name
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Measure droplet spreading diameter from high-speed TIFF sequences.")
     parser.add_argument(
@@ -675,8 +679,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         dest="output_csv",
         type=Path,
-        default=Path("outputs/spreading_diameter.csv"),
-        help="Output CSV path. Default: outputs/spreading_diameter.csv",
+        default=None,
+        help="Output CSV path. Default: outputs/<input-folder>/spreading_diameter.csv",
+    )
+    parser.add_argument(
+        "--max-frame",
+        type=positive_int,
+        default=None,
+        help="Only process frames up to this 1-based frame number (inclusive). Default: no limit.",
     )
     parser.add_argument("--fps", type=positive_float, default=DEFAULT_FPS, help="Camera frame rate in fps. Default: 8000")
     parser.add_argument(
@@ -689,7 +699,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--surface-y", type=nonnegative_int, default=None, help="Override detected surface y coordinate in pixels.")
     parser.add_argument("--surface-frame", type=nonnegative_int, default=None, help="Frame number used to calibrate surface y from the droplet/reflection waist.")
     parser.add_argument("--threshold", type=positive_float, default=None, help="Override dark foreground threshold in gray levels.")
-    parser.add_argument("--min-foreground-delta", type=positive_float, default=120.0, help="Lower bound for automatic threshold.")
+    parser.add_argument(
+        "--min-foreground-delta",
+        type=positive_float,
+        default=DEFAULT_MIN_FOREGROUND_DELTA,
+        help="Lower bound for automatic threshold. Default: 700",
+    )
     parser.add_argument("--min-area-px", type=positive_float, default=250, help="Minimum liquid component area in pixels.")
     parser.add_argument("--morphology-radius-px", type=nonnegative_int, default=3, help="Morphology radius for mask cleanup.")
     parser.add_argument("--measure-above-surface-px", type=nonnegative_int, default=20, help="Measurement window above detected surface.")
@@ -704,15 +719,21 @@ def build_parser() -> argparse.ArgumentParser:
         default="impact",
         help="Set time origin. Default: impact",
     )
-    parser.add_argument("--debug-dir", type=Path, default=Path("outputs/debug_overlays"), help="Directory for overlay PNG diagnostics. Default: outputs/debug_overlays")
+    parser.add_argument(
+        "--debug-dir",
+        type=Path,
+        default=None,
+        help="Directory for overlay PNG diagnostics. Default: outputs/<input-folder>/debug_overlays",
+    )
     parser.add_argument("--debug-every", type=int, default=25, help="Write one debug overlay every N frames when --debug-dir is used.")
     return parser
 
 
 def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
+    output_dir = default_output_dir(args.input_dir)
     return AnalysisConfig(
         input_dir=args.input_dir,
-        output_csv=args.output_csv,
+        output_csv=args.output_csv or output_dir / "spreading_diameter.csv",
         fps=args.fps,
         pixel_size_mm=args.pixel_size_mm,
         background_frames=args.background_frames,
@@ -730,8 +751,9 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         min_touch_pixels=args.min_touch_pixels,
         include_pre_impact=args.include_pre_impact,
         time_zero=args.time_zero,
-        debug_dir=args.debug_dir,
+        debug_dir=args.debug_dir or output_dir / "debug_overlays",
         debug_every=args.debug_every,
+        max_frame=args.max_frame,
     )
 
 

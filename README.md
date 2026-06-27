@@ -9,8 +9,13 @@ exports droplet spreading diameter as a function of time.
 The project uses `uv` for dependency and environment management.
 
 ```bash
-uv run droplet-impact-cv sourcedata/example -o outputs/example_spreading_diameter.csv
+uv run droplet-impact-cv sourcedata/example
 ```
+
+By default, all outputs are grouped under a folder named after the input
+folder. For the command above, the CSV is written to
+`outputs/example/spreading_diameter.csv` and diagnostic overlays are written to
+`outputs/example/debug_overlays`.
 
 Default physical parameters:
 
@@ -28,6 +33,9 @@ uv run droplet-impact-cv path/to/tiff_frames \
   --debug-every 1
 ```
 
+Use `--max-frame 120` to process only frames 1 through 120. If omitted, the
+full sequence is processed.
+
 Use `--surface-frame` when a frame shows clear symmetry between the droplet and
 its reflection. The detected waist between the droplet and its reflection is
 then used as the center height of a fixed surface line for the full sequence.
@@ -38,19 +46,22 @@ pixel coordinate.
 The reported spreading diameter is the length of the liquid contour intersection
 with the fixed surface line.
 
-Debug overlays are written by default to `outputs/debug_overlays`. Use
-`--debug-dir` to choose a different directory.
+Debug overlays are written under the input-specific output folder by default.
+Use `--debug-dir` to choose a different directory.
 
 The CSV columns are:
 
-- `frame`
 - `filename`
+- `frame`
 - `time_ms`
 - `diameter_px`
 - `diameter_mm`
-- `component_area_px`
-- `surface_y_px`
 - `impact_frame`
+- `surface_y_px`
+- `component_area_px`
+- `fps`
+- `pixel-size-mm`
+- `surface-frame`
 
 By default, `time_ms = 0` at the automatically detected impact frame and
 pre-impact rows are omitted. Use `--include-pre-impact` to keep all frames, or
