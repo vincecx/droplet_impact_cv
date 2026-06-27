@@ -91,9 +91,17 @@ def make_structure(radius_px: int) -> np.ndarray:
 
 
 def clean_binary_mask(mask: np.ndarray, structure: np.ndarray) -> np.ndarray:
-    cleaned = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, structure)
-    cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, structure)
-    return ndi.binary_fill_holes(cleaned > 0).astype(np.uint8)
+    closed = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, structure) > 0
+    opened = cv2.morphologyEx(closed.astype(np.uint8), cv2.MORPH_OPEN, structure) > 0
+
+    # Use the opened regions as reliable foreground markers, then reconstruct
+    # their original closed shapes.  A conventional opening removes narrow
+    # but real contour sections, such as a dark contact-line boundary beside
+    # a bright reflection.  Reconstruction restores such sections when they
+    # remain connected to a robust liquid region while still rejecting small,
+    # disconnected foreground artifacts that the opening removed completely.
+    reconstructed = ndi.binary_propagation(opened, mask=closed)
+    return ndi.binary_fill_holes(reconstructed).astype(np.uint8)
 
 
 def foreground_mask(
