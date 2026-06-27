@@ -241,6 +241,35 @@ def spreading_profile_on_surface(
     return profile
 
 
+def fill_droplet_interior(
+    component: np.ndarray,
+    surface_line: SurfaceLine,
+    seal_half_width_px: int = 1,
+) -> np.ndarray:
+    """Seal the substrate contact span and fill the droplet interior.
+
+    An internal bright region can leak into the background through the contact
+    line and survive a conventional hole fill.  By default, the liquid contact
+    span is continuous and the selected droplet contains no internal air gaps.
+    Top- and side-open exterior concavities remain unchanged.
+    """
+    filled = ndi.binary_fill_holes(np.asarray(component, dtype=bool))
+    profile = spreading_profile_on_surface(filled, surface_line, seal_half_width_px)
+    contact_xs = np.flatnonzero(profile)
+    if contact_xs.size == 0:
+        return filled
+
+    height, width = filled.shape
+    xs = np.arange(int(contact_xs[0]), int(contact_xs[-1]) + 1)
+    surface_ys = np.rint(surface_line.y_at(xs, width)).astype(int)
+    for offset in range(-seal_half_width_px, seal_half_width_px + 1):
+        ys = surface_ys + offset
+        valid = (ys >= 0) & (ys < height)
+        filled[ys[valid], xs[valid]] = True
+
+    return ndi.binary_fill_holes(filled)
+
+
 def component_measurement(
     mask: np.ndarray,
     surface_line: SurfaceLine,
@@ -250,8 +279,12 @@ def component_measurement(
     if area == 0:
         return ComponentMeasurement(math.nan, 0, None, component)
 
-    # Keep the measured contour tied to foreground pixels. Polygon approximation
-    # can cut across concave edges or extend beyond the actual liquid boundary.
+    # Seal apparent holes that open through a few pixels near the substrate,
+    # then treat the selected droplet's enclosed bright regions as liquid.
+    component = fill_droplet_interior(component, surface_line)
+
+    # Keep the outer measured contour tied to foreground pixels. Polygon
+    # approximation can cut across concave edges or extend beyond the liquid.
     component &= surface_band_mask(
         component.shape,
         surface_line,

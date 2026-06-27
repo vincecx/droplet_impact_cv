@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from droplet_impact_cv.imaging import foreground_mask, make_structure
+from droplet_impact_cv.imaging import component_measurement, foreground_mask, make_structure
 from droplet_impact_cv.models import (
     DEFAULT_MIN_FOREGROUND_DELTA,
     AnalysisConfig,
@@ -17,7 +17,7 @@ class ForegroundMaskTests(unittest.TestCase):
     def test_default_threshold_excludes_weak_shadow_attached_to_droplet(self) -> None:
         background = np.full((60, 60), 4000, dtype=np.float32)
         image = background.copy()
-        image[15:40, 20:40] = 2800  # Droplet: delta 1200.
+        image[15:40, 20:40] = 2000  # Droplet: delta 2000.
         image[40:43, 20:40] = 3200  # Attached weak shadow: delta 800.
         config = AnalysisConfig(
             input_dir=Path("input"),
@@ -36,6 +36,25 @@ class ForegroundMaskTests(unittest.TestCase):
 
         self.assertEqual(mask[30, 30], 1)
         self.assertEqual(mask[41, 30], 0)
+
+
+class ComponentMeasurementTests(unittest.TestCase):
+    def test_bright_gap_open_at_surface_is_filled_as_droplet_interior(self) -> None:
+        mask = np.zeros((80, 100), dtype=np.uint8)
+        mask[30:55, 20:80] = 1
+        mask[45:55, 45:55] = 0
+        config = AnalysisConfig(
+            input_dir=Path("input"),
+            output_csv=Path("output.csv"),
+            min_area_px=1,
+            min_touch_pixels=1,
+            debug_dir=None,
+        )
+
+        measurement = component_measurement(mask, SurfaceLine(50.0, angle_deg=0.0), config)
+
+        self.assertEqual(measurement.diameter_px, 60.0)
+        self.assertTrue(measurement.mask[50, 50])
 
 
 if __name__ == "__main__":
