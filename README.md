@@ -1,7 +1,7 @@
 # droplet-impact-cv
 
 Automated side-view image analysis for droplet impact sequences. The CLI reads
-16-bit grayscale TIFF frames, detects the solid surface and impact frame, then
+16-bit grayscale TIFF frames, detects the substrate surface and impact frame, then
 exports droplet spreading diameter as a function of time.
 
 ## Usage
@@ -11,11 +11,6 @@ The project uses `uv` for dependency and environment management.
 ```bash
 uv run droplet-impact-cv sourcedata/example
 ```
-
-By default, all outputs are grouped under a folder named after the input
-folder. For the command above, the CSV is written to
-`outputs/example/spreading_diameter.csv` and diagnostic overlays are written to
-`outputs/example/debug_overlays`.
 
 Default physical parameters:
 
@@ -29,7 +24,7 @@ uv run droplet-impact-cv path/to/tiff_frames \
   --fps 8000 \
   --pixel-size-mm 0.00711883341 \
   --surface-frame 61 \
-  -o outputs/spreading_diameter.csv \
+  -o outputs/example/spreading_diameter.csv \
   --debug-every 1
 ```
 
@@ -39,16 +34,22 @@ full sequence is processed.
 Use `--surface-frame` when a frame shows clear symmetry between the droplet and
 its reflection. The detected waist between the droplet and its reflection is
 then used as the center height of a fixed surface line for the full sequence.
+
 Surface angles are measured clockwise from horizontal, with a default of `-0.5`
 degrees (that is, `0.5` degrees counterclockwise). Use
 `--surface-y` to manually override this calibration with the surface-line center
 pixel coordinate.
 
+## Outputs
+
+By default, all outputs are grouped under a folder named after the input
+folder. e.g., For the command `uv run droplet-impact-cv sourcedata/example`, the
+CSV is written to `outputs/example/spreading_diameter.csv` and diagnostic
+overlays are written to `outputs/example/debug_overlays`. Use `--debug-dir` to
+choose a different directory for debug overlays.
+
 The reported spreading diameter is the length of the liquid contour intersection
 with the fixed surface line.
-
-Debug overlays are written under the input-specific output folder by default.
-Use `--debug-dir` to choose a different directory.
 
 The CSV columns are:
 

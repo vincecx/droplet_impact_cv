@@ -170,7 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--debug-every",
         type=int,
         default=25,
-        help="Write one debug overlay every N frames when --debug-dir is used.",
+        help="Write one debug overlay every N frames.",
     )
     return parser
 
