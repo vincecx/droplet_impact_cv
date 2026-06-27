@@ -12,6 +12,7 @@ DEFAULT_PIXEL_SIZE_MM = 0.00711883341
 DEFAULT_SURFACE_ANGLE_DEG = -0.6
 DEFAULT_MIN_FOREGROUND_DELTA = 1500.0
 DEFAULT_THRESHOLD_SAMPLE_FRAMES = 8
+REFLECTION_MODES = ("auto", "mirror", "none")
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class AnalysisConfig:
     surface_y: int | None = None
     surface_frame: int | None = None
     surface_angle_deg: float | None = None
+    reflection_mode: str = "auto"
     threshold: float | None = None
     min_foreground_delta: float = DEFAULT_MIN_FOREGROUND_DELTA
     min_area_px: int = 250

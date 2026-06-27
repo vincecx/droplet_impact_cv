@@ -11,6 +11,7 @@ from .models import (
     DEFAULT_FPS,
     DEFAULT_MIN_FOREGROUND_DELTA,
     DEFAULT_PIXEL_SIZE_MM,
+    REFLECTION_MODES,
     AnalysisConfig,
 )
 from .output import write_csv
@@ -108,8 +109,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=nonnegative_int,
         default=None,
         help=(
-            "Frame number used to calibrate the surface line from the two "
-            "droplet/reflection contact vertices."
+            "Frame number containing an impacted droplet, used to calibrate "
+            "the surface line according to --reflection-mode."
+        ),
+    )
+    parser.add_argument(
+        "--reflection-mode",
+        choices=REFLECTION_MODES,
+        default="auto",
+        help=(
+            "Surface calibration and measurement mode: auto, mirror, or none. "
+            "Weak reflections should use none. Default: auto."
         ),
     )
     parser.add_argument(
@@ -242,6 +252,7 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         surface_y=args.surface_y,
         surface_frame=args.surface_frame,
         surface_angle_deg=args.surface_angle_deg,
+        reflection_mode=args.reflection_mode,
         threshold=args.threshold,
         min_foreground_delta=args.min_foreground_delta,
         min_area_px=int(args.min_area_px),

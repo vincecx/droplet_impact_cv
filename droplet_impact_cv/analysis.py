@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from pathlib import Path
 
 from .imaging import (
     build_background,
     component_measurement,
+    detect_reflection_mode_from_frame,
     estimate_surface_y,
+    estimate_surface_line_from_nonreflection_frame,
     estimate_surface_line_from_symmetry_frame,
     estimate_threshold,
-    find_tiff_files,
+    find_image_files,
     frame_number_from_filename,
     foreground_mask,
     make_structure,
@@ -27,7 +30,7 @@ from .visualization import write_debug_overlay
 
 
 def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
-    all_files = find_tiff_files(config.input_dir)
+    all_files = find_image_files(config.input_dir)
     if config.start_frame is not None and config.start_frame < 1:
         raise ValueError("start_frame must be at least 1")
     if config.end_frame is not None and config.end_frame < 1:
@@ -76,17 +79,45 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
         )
     )
     calibrated_surface_line: SurfaceLine | None = None
+    resolved_reflection_mode = config.reflection_mode
     if config.surface_frame is not None:
-        calibrated_surface_line = estimate_surface_line_from_symmetry_frame(
-            files,
-            background,
-            config.surface_frame,
-            preliminary_threshold,
-            coarse_surface_y,
-            config,
-            structure,
-            angle_override_deg=config.surface_angle_deg,
-        )
+        if resolved_reflection_mode == "auto":
+            resolved_reflection_mode = detect_reflection_mode_from_frame(
+                files,
+                background,
+                config.surface_frame,
+                preliminary_threshold,
+                coarse_surface_y,
+                config,
+                structure,
+            )
+        if resolved_reflection_mode == "mirror":
+            calibrated_surface_line = estimate_surface_line_from_symmetry_frame(
+                files,
+                background,
+                config.surface_frame,
+                preliminary_threshold,
+                coarse_surface_y,
+                config,
+                structure,
+                angle_override_deg=config.surface_angle_deg,
+            )
+        else:
+            calibrated_surface_line = estimate_surface_line_from_nonreflection_frame(
+                files,
+                background,
+                config.surface_frame,
+                preliminary_threshold,
+                config,
+                structure,
+                angle_override_deg=config.surface_angle_deg,
+            )
+    elif resolved_reflection_mode == "auto":
+        # Without a calibration frame there is not enough evidence to change
+        # the original mirror-surface measurement behavior safely.
+        resolved_reflection_mode = "mirror"
+
+    effective_config = replace(config, reflection_mode=resolved_reflection_mode)
 
     if config.surface_y is not None:
         surface_y = int(config.surface_y)
@@ -121,9 +152,20 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
     for file_path in files:
         frame_number = frame_number_from_filename(file_path)
         image = read_image(file_path)
-        mask = foreground_mask(image, background, surface_line, threshold, config, structure)
-        measurement = component_measurement(mask, surface_line, config)
-        is_touching = touches_surface(measurement.mask, surface_line, config)
+        mask = foreground_mask(
+            image,
+            background,
+            surface_line,
+            threshold,
+            effective_config,
+            structure,
+        )
+        measurement = component_measurement(mask, surface_line, effective_config)
+        is_touching = touches_surface(
+            measurement.mask,
+            surface_line,
+            effective_config,
+        )
         if impact_frame is None and is_touching and not math.isnan(measurement.diameter_px):
             impact_frame = frame_number
         pending.append(

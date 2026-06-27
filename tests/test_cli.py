@@ -21,7 +21,8 @@ class CliConfigTests(unittest.TestCase):
                 "# Experiment settings\n"
                 "--fps 4000\n"
                 "--pixel-size-mm 0.01682736321\n"
-                "--surface-frame 9105\n",
+                "--surface-frame 9105\n"
+                "--reflection-mode none\n",
                 encoding="utf-8",
             )
 
@@ -30,6 +31,7 @@ class CliConfigTests(unittest.TestCase):
         self.assertEqual(config.fps, 4000.0)
         self.assertEqual(config.pixel_size_mm, 0.01682736321)
         self.assertEqual(config.surface_frame, 9105)
+        self.assertEqual(config.reflection_mode, "none")
         self.assertEqual(config.min_foreground_delta, DEFAULT_MIN_FOREGROUND_DELTA)
 
     def test_command_line_overrides_input_folder_config(self) -> None:
@@ -106,6 +108,20 @@ class CliConfigTests(unittest.TestCase):
 
         self.assertIsNone(automatic.surface_angle_deg)
         self.assertEqual(overridden.surface_angle_deg, 1.25)
+
+    def test_command_line_overrides_configured_reflection_mode(self) -> None:
+        with TemporaryDirectory() as temporary_dir:
+            input_dir = Path(temporary_dir)
+            (input_dir / "cv_config.txt").write_text(
+                "--reflection-mode mirror\n",
+                encoding="utf-8",
+            )
+
+            config = config_from_args(
+                parse_args([str(input_dir), "--reflection-mode", "none"])
+            )
+
+        self.assertEqual(config.reflection_mode, "none")
 
 
 if __name__ == "__main__":

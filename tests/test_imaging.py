@@ -12,9 +12,12 @@ from droplet_impact_cv.imaging import (
     build_background,
     component_measurement,
     estimate_contact_line,
+    estimate_surface_line_from_nonreflection_frame,
     estimate_vertical_symmetry_y,
     foreground_mask,
+    find_image_files,
     make_structure,
+    read_image,
     select_calibration_component,
     select_symmetric_calibration_component,
 )
@@ -40,6 +43,19 @@ class BackgroundTests(unittest.TestCase):
             background,
             np.full((4, 5), 1000, dtype=np.float32),
         )
+
+    def test_jpeg_frames_are_discovered_and_scaled_to_12_bit(self) -> None:
+        with TemporaryDirectory() as temporary_dir:
+            input_dir = Path(temporary_dir)
+            jpeg_path = input_dir / "capture_000001.jpg"
+            cv2.imwrite(str(jpeg_path), np.full((8, 9), 255, dtype=np.uint8))
+
+            files = find_image_files(input_dir)
+            image = read_image(files[0])
+
+        self.assertEqual(files, [jpeg_path])
+        self.assertEqual(image.shape, (8, 9))
+        self.assertAlmostEqual(float(np.median(image)), 4095.0, delta=20.0)
 
 
 class ForegroundMaskTests(unittest.TestCase):
@@ -135,8 +151,59 @@ class ComponentMeasurementTests(unittest.TestCase):
         self.assertEqual(measurement.diameter_px, 60.0)
         self.assertTrue(measurement.mask[50, 50])
 
+    def test_nonreflection_mode_projects_contact_band_above_surface(self) -> None:
+        mask = np.zeros((80, 100), dtype=np.uint8)
+        mask[30:48, 20:80] = 1
+        config = AnalysisConfig(
+            input_dir=Path("input"),
+            output_csv=Path("output.csv"),
+            reflection_mode="none",
+            min_area_px=1,
+            min_touch_pixels=1,
+            touch_above_surface_px=5,
+            debug_dir=None,
+        )
+
+        measurement = component_measurement(mask, SurfaceLine(50.0, 0.0), config)
+
+        self.assertEqual(measurement.diameter_px, 60.0)
+
 
 class SurfaceCalibrationTests(unittest.TestCase):
+    def test_nonreflection_calibration_uses_droplet_lower_contour(self) -> None:
+        with TemporaryDirectory() as temporary_dir:
+            input_dir = Path(temporary_dir)
+            background = np.full((100, 120), 4000, dtype=np.uint16)
+            background[75:] = 2000
+            calibration = background.copy()
+            calibration[30:56, 35:85] = 1000
+            # A larger change clipped by the image border must not be selected
+            # instead of the complete impacted-droplet contour.
+            calibration[85:, :100] = 0
+            background_path = input_dir / "capture_000001.tif"
+            calibration_path = input_dir / "capture_000002.tif"
+            tifffile.imwrite(background_path, background)
+            tifffile.imwrite(calibration_path, calibration)
+            config = AnalysisConfig(
+                input_dir=input_dir,
+                output_csv=input_dir / "output.csv",
+                min_area_px=10,
+                morphology_radius_px=1,
+                debug_dir=None,
+            )
+
+            line = estimate_surface_line_from_nonreflection_frame(
+                [background_path, calibration_path],
+                background.astype(np.float32),
+                2,
+                1000,
+                config,
+                make_structure(1),
+            )
+
+        self.assertAlmostEqual(line.center_y, 55.0, delta=1.0)
+        self.assertAlmostEqual(line.angle_deg, 0.0, delta=0.2)
+
     def test_contact_line_uses_outward_tips_without_reflection_lobes(self) -> None:
         component = np.zeros((100, 180), dtype=bool)
         row_ys = np.arange(20, 81)

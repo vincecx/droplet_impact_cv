@@ -1,10 +1,10 @@
 # droplet-impact-cv
 
 Automated side-view image analysis for droplet impact sequences. The CLI reads
-16-bit grayscale TIFF frames, detects the substrate surface and impact frame, then
-exports droplet spreading diameter as a function of time.
+grayscale TIFF frames or 8-bit JPEG exports, detects the substrate surface and
+impact frame, then exports droplet spreading diameter as a function of time.
 
-Each TIFF filename must end with a six-digit frame number immediately before the
+Each image filename must end with a six-digit frame number immediately before the
 extension. For example, `capture_000005.tif` is reported as frame 5 even when it
 is the first file in the input directory.
 
@@ -49,16 +49,28 @@ starting with `#` are allowed. For example:
 --fps 4000
 --pixel-size-mm 0.01682736321
 --surface-frame 9105
+--reflection-mode mirror
 ```
 
 Configuration precedence is: explicit command-line options, then
 `cv_config.txt`, then the defaults defined by the program. For example,
 `--fps 8000` on the command line overrides `--fps 4000` in `cv_config.txt`.
 
-Use `--surface-frame` when a frame shows clear symmetry between the droplet and
-its reflection. The two contact-line tips (or the concave vertices between split
-reflection lobes) define both the center height and angle of a fixed surface line
-for the full sequence.
+Use `--surface-frame` to select a frame containing an impacted droplet, then use
+`--reflection-mode` to choose its calibration and measurement method:
+
+- `mirror`: fit the surface through the contact vertices between the droplet and
+  its strong reflection; spreading width is measured on that line.
+- `none`: fit the surface to the lower contour of the impacted droplet in the
+  selected surface frame; weak reflections are treated as `none`, and width is
+  measured over the narrow apparent-contact band above that line.
+- `auto` (default): use `mirror` only when the calibration silhouette provides
+  strong reflection evidence; otherwise use `none`.
+
+Automatic classification is deliberately conservative. Set the mode explicitly
+in `cv_config.txt` or on the command line for transparent droplets, weak
+reflections, or backgrounds with multiple horizontal edges. Command-line values
+override the per-folder configuration as usual.
 
 Surface angles are measured clockwise from horizontal. Use
 `--surface-angle-deg` to override the automatically detected angle. If no
@@ -74,8 +86,9 @@ CSV is written to `outputs/example/spreading_diameter.csv` and diagnostic
 overlays are written to `outputs/example/debug_overlays`. Use `--debug-dir` to
 choose a different directory for debug overlays.
 
-The reported spreading diameter is the length of the liquid contour intersection
-with the fixed surface line.
+In mirror mode the reported spreading diameter is the liquid-contour intersection
+with the fixed surface line. In non-mirror mode it is the projection of the
+apparent contact band immediately above that line.
 
 The CSV columns are:
 

@@ -15,6 +15,8 @@ from .models import AnalysisConfig, ComponentMeasurement, SurfaceLine
 
 SURFACE_MASK_BELOW_TOLERANCE_PX = 0
 FRAME_NUMBER_PATTERN = re.compile(r"(?<!\d)(\d{6})$")
+SUPPORTED_IMAGE_SUFFIXES = (".tif", ".tiff", ".jpg", ".jpeg")
+MAX_REFLECTION_SYMMETRY_ERROR = 0.1
 
 
 def natural_sort_key(path: Path) -> list[int | str]:
@@ -31,12 +33,16 @@ def frame_number_from_filename(path: Path) -> int:
     return int(match.group(1))
 
 
-def find_tiff_files(input_dir: Path) -> list[Path]:
+def find_image_files(input_dir: Path) -> list[Path]:
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
-    files = [*input_dir.glob("*.tif"), *input_dir.glob("*.tiff")]
+    files = [
+        path
+        for path in input_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_SUFFIXES
+    ]
     if not files:
-        raise FileNotFoundError(f"No .tif or .tiff images found in: {input_dir}")
+        raise FileNotFoundError(f"No TIFF or JPEG images found in: {input_dir}")
 
     numbered_files = sorted(
         ((frame_number_from_filename(path), path) for path in files),
@@ -52,8 +58,25 @@ def find_tiff_files(input_dir: Path) -> list[Path]:
     return [path for _, path in numbered_files]
 
 
+def find_tiff_files(input_dir: Path) -> list[Path]:
+    """Backward-compatible alias for callers using the original API name."""
+    return find_image_files(input_dir)
+
+
 def read_image(path: Path) -> np.ndarray:
-    image = tifffile.imread(path)
+    if path.suffix.lower() in {".tif", ".tiff"}:
+        image = tifffile.imread(path)
+    else:
+        encoded = np.frombuffer(path.read_bytes(), dtype=np.uint8)
+        image = cv2.imdecode(encoded, cv2.IMREAD_UNCHANGED)
+        if image is None:
+            raise ValueError(f"Could not decode image: {path}")
+        if image.ndim == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # Existing thresholds are expressed in the camera's 12-bit gray-level
+        # scale. Preserve that scale when 8-bit JPEG exports are supplied.
+        if image.dtype == np.uint8:
+            image = image.astype(np.float32) * (4095.0 / 255.0)
     if image.ndim != 2:
         raise ValueError(f"Expected a grayscale image, got shape {image.shape}: {path}")
     return image.astype(np.float32, copy=False)
@@ -271,6 +294,37 @@ def spreading_profile_on_surface(
     return profile
 
 
+def spreading_profile_near_surface(
+    component: np.ndarray,
+    surface_line: SurfaceLine,
+    above_px: int,
+) -> np.ndarray:
+    """Project the apparent contact region onto the surface x axis.
+
+    On a non-reflective wall the visible liquid contour commonly stops a few
+    pixels above the substrate edge because of glare. Projecting the narrow
+    region immediately above that edge retains the physical contact span.
+    """
+    yy, xx = np.indices(component.shape)
+    distance = yy - surface_line.y_at(xx, component.shape[1])
+    contact_band = (distance >= -above_px) & (distance <= 0)
+    return np.any(component & contact_band, axis=0)
+
+
+def measurement_profile(
+    component: np.ndarray,
+    surface_line: SurfaceLine,
+    config: AnalysisConfig,
+) -> np.ndarray:
+    if config.reflection_mode == "none":
+        return spreading_profile_near_surface(
+            component,
+            surface_line,
+            config.touch_above_surface_px,
+        )
+    return spreading_profile_on_surface(component, surface_line)
+
+
 def fill_droplet_interior(
     component: np.ndarray,
     surface_line: SurfaceLine,
@@ -324,7 +378,7 @@ def component_measurement(
     if clipped_component.any():
         component = clipped_component
     area = int(component.sum())
-    profile = spreading_profile_on_surface(component, surface_line)
+    profile = measurement_profile(component, surface_line, config)
     bounds = longest_true_run(profile)
     if bounds is None:
         return ComponentMeasurement(math.nan, area, None, component)
@@ -337,7 +391,7 @@ def component_measurement(
 
 
 def touches_surface(mask: np.ndarray, surface_line: SurfaceLine, config: AnalysisConfig) -> bool:
-    profile = spreading_profile_on_surface(mask, surface_line)
+    profile = measurement_profile(mask, surface_line, config)
     bounds = longest_true_run(profile)
     if bounds is None:
         return False
@@ -491,6 +545,25 @@ def select_symmetric_calibration_component(
     return best[1], best[2]
 
 
+def detect_reflection_mode(
+    mask: np.ndarray,
+    coarse_surface_y: int,
+    config: AnalysisConfig,
+) -> str:
+    """Conservatively classify a calibration silhouette as mirror or none."""
+    if select_calibration_component(mask, coarse_surface_y, config) is not None:
+        return "mirror"
+
+    selected = select_symmetric_calibration_component(mask, coarse_surface_y, config)
+    if selected is None:
+        return "none"
+    component, bbox = selected
+    _symmetry_y, symmetry_error = estimate_vertical_symmetry_y(component, bbox)
+    if symmetry_error <= MAX_REFLECTION_SYMMETRY_ERROR:
+        return "mirror"
+    return "none"
+
+
 def row_run_width(component: np.ndarray, row_y: int) -> int:
     bounds = longest_true_run(component[row_y])
     if bounds is None:
@@ -560,6 +633,155 @@ def estimate_contact_line(component: np.ndarray) -> SurfaceLine:
     return SurfaceLine(center_y, math.degrees(math.atan(slope)))
 
 
+def calibration_frame_mask(
+    files: list[Path],
+    background: np.ndarray,
+    frame_number: int,
+    threshold: float,
+    structure: np.ndarray,
+) -> np.ndarray:
+    matching_file = next(
+        (path for path in files if frame_number_from_filename(path) == frame_number),
+        None,
+    )
+    if matching_file is None:
+        raise ValueError(f"--surface-frame {frame_number} does not exist in the input sequence")
+    return full_foreground_mask(read_image(matching_file), background, threshold, structure)
+
+
+def detect_reflection_mode_from_frame(
+    files: list[Path],
+    background: np.ndarray,
+    frame_number: int,
+    threshold: float,
+    coarse_surface_y: int,
+    config: AnalysisConfig,
+    structure: np.ndarray,
+) -> str:
+    mask = calibration_frame_mask(
+        files,
+        background,
+        frame_number,
+        threshold,
+        structure,
+    )
+    return detect_reflection_mode(mask, coarse_surface_y, config)
+
+
+def select_nonreflection_calibration_component(
+    mask: np.ndarray,
+    config: AnalysisConfig,
+) -> np.ndarray | None:
+    """Select the impacted droplet without using a substrate-edge position."""
+    labels, count = ndi.label(mask)
+    best_component: np.ndarray | None = None
+    best_area = 0
+    height, width = mask.shape
+
+    for label in range(1, count + 1):
+        component = labels == label
+        area = int(component.sum())
+        if area < config.min_area_px or area <= best_area:
+            continue
+        bbox = component_bbox(component)
+        if bbox is None:
+            continue
+        x_min, y_min, x_max, y_max = bbox
+        if x_min == 0 or y_min == 0 or x_max == width - 1 or y_max == height - 1:
+            continue
+        best_component = component
+        best_area = area
+
+    return best_component
+
+
+def estimate_lower_contour_line(
+    component: np.ndarray,
+    angle_override_deg: float | None,
+) -> SurfaceLine:
+    """Fit a tangent-like surface line to the lowest stable contour segment."""
+    bbox = component_bbox(component)
+    if bbox is None:
+        raise ValueError("Cannot estimate a lower contour from an empty component")
+    x_min, _y_min, x_max, _y_max = bbox
+    contour_x = []
+    contour_y = []
+    for x in range(x_min, x_max + 1):
+        ys = np.flatnonzero(component[:, x])
+        if ys.size:
+            contour_x.append(x)
+            contour_y.append(int(ys[-1]))
+
+    xs = np.asarray(contour_x, dtype=np.float64)
+    ys = np.asarray(contour_y, dtype=np.float64)
+    if len(xs) < 2:
+        raise ValueError("Droplet lower contour contains fewer than two points")
+
+    # Image y increases downward. Restrict the fit to the lowest 20% of the
+    # per-column contour so curved side walls do not pull the line upward.
+    cutoff = float(np.percentile(ys, 80))
+    lower = ys >= cutoff
+    if int(lower.sum()) < 5:
+        lowest_indices = np.argsort(ys)[-min(5, len(ys)) :]
+        fit_x = xs[lowest_indices]
+        fit_y = ys[lowest_indices]
+    else:
+        fit_x = xs[lower]
+        fit_y = ys[lower]
+
+    if len(fit_x) >= 3:
+        for _ in range(4):
+            slope, intercept = np.polyfit(fit_x, fit_y, 1)
+            residual = fit_y - (slope * fit_x + intercept)
+            median = float(np.median(residual))
+            mad = float(np.median(np.abs(residual - median)))
+            inlier_limit = max(1.5, 3.0 * 1.4826 * mad)
+            inliers = np.abs(residual - median) <= inlier_limit
+            if int(inliers.sum()) < 10 or bool(np.all(inliers)):
+                break
+            fit_x = fit_x[inliers]
+            fit_y = fit_y[inliers]
+        slope, intercept = np.polyfit(fit_x, fit_y, 1)
+        center_y = float(slope * ((component.shape[1] - 1) / 2.0) + intercept)
+        detected_angle = math.degrees(math.atan(float(slope)))
+        if abs(detected_angle) > 5.0:
+            center_y = float(np.median(fit_y))
+            detected_angle = 0.0
+    else:
+        slope, intercept = np.polyfit(fit_x, fit_y, 1)
+        center_y = float(slope * ((component.shape[1] - 1) / 2.0) + intercept)
+        detected_angle = math.degrees(math.atan(float(slope)))
+
+    angle = detected_angle if angle_override_deg is None else float(angle_override_deg)
+    return SurfaceLine(center_y, angle)
+
+
+def estimate_surface_line_from_nonreflection_frame(
+    files: list[Path],
+    background: np.ndarray,
+    frame_number: int,
+    threshold: float,
+    config: AnalysisConfig,
+    structure: np.ndarray,
+    angle_override_deg: float | None = None,
+) -> SurfaceLine:
+    """Fit the surface to the impacted droplet's lower contour."""
+    mask = calibration_frame_mask(
+        files,
+        background,
+        frame_number,
+        threshold,
+        structure,
+    )
+    component = select_nonreflection_calibration_component(mask, config)
+    if component is None:
+        raise ValueError(
+            "Could not find a non-border droplet component in "
+            f"surface calibration frame {frame_number}"
+        )
+    return estimate_lower_contour_line(component, angle_override_deg)
+
+
 def estimate_surface_line_from_symmetry_frame(
     files: list[Path],
     background: np.ndarray,
@@ -570,15 +792,13 @@ def estimate_surface_line_from_symmetry_frame(
     structure: np.ndarray,
     angle_override_deg: float | None = None,
 ) -> SurfaceLine:
-    matching_file = next(
-        (path for path in files if frame_number_from_filename(path) == frame_number),
-        None,
+    mask = calibration_frame_mask(
+        files,
+        background,
+        frame_number,
+        threshold,
+        structure,
     )
-    if matching_file is None:
-        raise ValueError(f"--surface-frame {frame_number} does not exist in the input sequence")
-
-    image = read_image(matching_file)
-    mask = full_foreground_mask(image, background, threshold, structure)
     selected = select_calibration_component(mask, coarse_surface_y, config)
     if selected is None:
         selected = select_symmetric_calibration_component(mask, coarse_surface_y, config)
