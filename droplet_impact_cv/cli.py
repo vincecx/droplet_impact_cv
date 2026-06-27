@@ -9,7 +9,6 @@ from .models import (
     DEFAULT_FPS,
     DEFAULT_MIN_FOREGROUND_DELTA,
     DEFAULT_PIXEL_SIZE_MM,
-    DEFAULT_SURFACE_ANGLE_DEG,
     AnalysisConfig,
 )
 from .output import write_csv
@@ -93,7 +92,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--surface-frame",
         type=nonnegative_int,
         default=None,
-        help="Frame number used to calibrate surface y from the droplet/reflection waist.",
+        help=(
+            "Frame number used to calibrate the surface line from the two "
+            "droplet/reflection contact vertices."
+        ),
+    )
+    parser.add_argument(
+        "--surface-angle-deg",
+        type=float,
+        default=None,
+        help=(
+            "Override surface angle in clockwise degrees. By default the angle is "
+            "detected from --surface-frame, or -0.6 when no calibration frame is given."
+        ),
     )
     parser.add_argument(
         "--threshold",
@@ -185,7 +196,7 @@ def config_from_args(args: argparse.Namespace) -> AnalysisConfig:
         background_frames=args.background_frames,
         surface_y=args.surface_y,
         surface_frame=args.surface_frame,
-        surface_angle_deg=DEFAULT_SURFACE_ANGLE_DEG,
+        surface_angle_deg=args.surface_angle_deg,
         threshold=args.threshold,
         min_foreground_delta=args.min_foreground_delta,
         min_area_px=int(args.min_area_px),

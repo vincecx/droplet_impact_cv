@@ -7,7 +7,7 @@ from .imaging import (
     build_background,
     component_measurement,
     estimate_surface_y,
-    estimate_surface_y_from_symmetry_frame,
+    estimate_surface_line_from_symmetry_frame,
     estimate_threshold,
     find_tiff_files,
     frame_number_from_filename,
@@ -16,7 +16,12 @@ from .imaging import (
     read_image,
     touches_surface,
 )
-from .models import AnalysisConfig, FrameMeasurement, SurfaceLine
+from .models import (
+    DEFAULT_SURFACE_ANGLE_DEG,
+    AnalysisConfig,
+    FrameMeasurement,
+    SurfaceLine,
+)
 from .visualization import write_debug_overlay
 
 
@@ -49,10 +54,9 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
             config.min_foreground_delta,
         )
     )
-    if config.surface_y is not None:
-        surface_y = int(config.surface_y)
-    elif config.surface_frame is not None:
-        surface_y = estimate_surface_y_from_symmetry_frame(
+    calibrated_surface_line: SurfaceLine | None = None
+    if config.surface_frame is not None:
+        calibrated_surface_line = estimate_surface_line_from_symmetry_frame(
             files,
             background,
             config.surface_frame,
@@ -60,10 +64,23 @@ def analyze_sequence(config: AnalysisConfig) -> list[FrameMeasurement]:
             coarse_surface_y,
             config,
             structure,
+            angle_override_deg=config.surface_angle_deg,
         )
+
+    if config.surface_y is not None:
+        surface_y = int(config.surface_y)
+    elif calibrated_surface_line is not None:
+        surface_y = calibrated_surface_line.center_y_int()
     else:
         surface_y = coarse_surface_y
-    surface_line = SurfaceLine(float(surface_y), config.surface_angle_deg)
+
+    if calibrated_surface_line is not None:
+        surface_angle_deg = calibrated_surface_line.angle_deg
+    elif config.surface_angle_deg is not None:
+        surface_angle_deg = config.surface_angle_deg
+    else:
+        surface_angle_deg = DEFAULT_SURFACE_ANGLE_DEG
+    surface_line = SurfaceLine(float(surface_y), surface_angle_deg)
 
     threshold = (
         float(config.threshold)

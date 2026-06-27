@@ -43,13 +43,15 @@ Use `--max-frame 120` to process only files whose filename frame number is at
 most 120. If omitted, the full sequence is processed.
 
 Use `--surface-frame` when a frame shows clear symmetry between the droplet and
-its reflection. The detected waist between the droplet and its reflection is
-then used as the center height of a fixed surface line for the full sequence.
+its reflection. The two contact-line tips (or the concave vertices between split
+reflection lobes) define both the center height and angle of a fixed surface line
+for the full sequence.
 
-Surface angles are measured clockwise from horizontal, with a default of `-0.6`
-degrees (that is, `0.6` degrees counterclockwise). Use
-`--surface-y` to manually override this calibration with the surface-line center
-pixel coordinate.
+Surface angles are measured clockwise from horizontal. Use
+`--surface-angle-deg` to override the automatically detected angle. If no
+`--surface-frame` or explicit angle is provided, the fallback is `-0.6` degrees
+(that is, `0.6` degrees counterclockwise). Use `--surface-y` to manually override
+the calibrated surface-line center pixel coordinate.
 
 ## Outputs
 

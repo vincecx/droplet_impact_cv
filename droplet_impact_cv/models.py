@@ -22,7 +22,7 @@ class AnalysisConfig:
     background_frames: int = 8
     surface_y: int | None = None
     surface_frame: int | None = None
-    surface_angle_deg: float = DEFAULT_SURFACE_ANGLE_DEG
+    surface_angle_deg: float | None = None
     threshold: float | None = None
     min_foreground_delta: float = DEFAULT_MIN_FOREGROUND_DELTA
     min_area_px: int = 250

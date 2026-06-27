@@ -8,11 +8,12 @@ import cv2
 import numpy as np
 import tifffile
 from scipy import ndimage as ndi
+from scipy.signal import find_peaks
 
 from .models import AnalysisConfig, ComponentMeasurement, SurfaceLine
 
 
-SURFACE_MASK_BELOW_TOLERANCE_PX = 4
+SURFACE_MASK_BELOW_TOLERANCE_PX = 0
 FRAME_NUMBER_PATTERN = re.compile(r"(?<!\d)(\d{6})$")
 
 
@@ -499,44 +500,68 @@ def row_run_width(component: np.ndarray, row_y: int) -> int:
     return int(x_max - x_min + 1)
 
 
-def estimate_surface_y_from_waist(
-    component: np.ndarray,
-    bbox: tuple[int, int, int, int],
-    coarse_surface_y: int,
-    config: AnalysisConfig,
-) -> int:
-    _x_min, y_min, _x_max, y_max = bbox
-    vertical_span = y_max - y_min + 1
-    lower_margin = max(30, vertical_span // 10)
-    search_top = max(
-        coarse_surface_y + config.touch_above_surface_px,
-        y_min + vertical_span // 3,
+def _contact_vertex_index(profile: np.ndarray, points_outward: bool) -> int:
+    """Find a contact tip, or the notch bracketed by two reflection lobes."""
+    smoothed = ndi.gaussian_filter1d(profile.astype(np.float32), sigma=2.0)
+    outward_signal = -smoothed if points_outward else smoothed
+    inward_signal = -outward_signal
+    prominence = max(2.0, 0.005 * float(np.ptp(profile)))
+    distance = max(3, int(round(0.03 * len(profile))))
+    outward, outward_properties = find_peaks(
+        outward_signal,
+        prominence=prominence,
+        distance=distance,
     )
-    search_bottom = min(
-        y_max - lower_margin,
-        coarse_surface_y + config.measure_below_surface_px,
+    inward, inward_properties = find_peaks(
+        inward_signal,
+        prominence=prominence,
+        distance=distance,
     )
-    if search_bottom <= search_top:
-        raise ValueError("Invalid waist search window for surface calibration frame")
 
-    rows = np.arange(search_top, search_bottom + 1)
-    widths = np.array([row_run_width(component, int(row)) for row in rows], dtype=np.float32)
-    valid = widths > 0
-    if not valid.any():
-        raise ValueError("No foreground rows found in surface calibration waist search window")
-
-    max_width = float(widths[valid].max())
-    min_width = max(10.0, max_width * 0.08)
-    candidate = valid & (widths >= min_width)
-    if not candidate.any():
-        candidate = valid
-
-    smoothed = ndi.gaussian_filter1d(widths, sigma=3.0)
-    smoothed[~candidate] = np.inf
-    return int(rows[int(np.argmin(smoothed))])
+    bracketed_inward = [
+        (index, inward_properties["prominences"][position])
+        for position, index in enumerate(inward)
+        if np.any(outward < index) and np.any(outward > index)
+    ]
+    if bracketed_inward:
+        return int(max(bracketed_inward, key=lambda item: item[1])[0])
+    if outward.size:
+        strongest = int(np.argmax(outward_properties["prominences"]))
+        return int(outward[strongest])
+    return int(np.argmax(outward_signal))
 
 
-def estimate_surface_y_from_symmetry_frame(
+def estimate_contact_line(component: np.ndarray) -> SurfaceLine:
+    """Fit the surface through the two contact tips or concave vertices."""
+    bbox = component_bbox(component)
+    if bbox is None:
+        raise ValueError("Cannot estimate a contact line from an empty component")
+    x_min, y_min, x_max, y_max = bbox
+    row_ys = np.arange(y_min, y_max + 1)
+    left_profile = np.empty(len(row_ys), dtype=np.float32)
+    right_profile = np.empty(len(row_ys), dtype=np.float32)
+    for index, row_y in enumerate(row_ys):
+        bounds = longest_true_run(component[row_y], close_size=1)
+        if bounds is None:
+            raise ValueError("Calibration component contains an empty interior row")
+        left_profile[index], right_profile[index] = bounds
+
+    left_index = _contact_vertex_index(left_profile, points_outward=True)
+    right_index = _contact_vertex_index(right_profile, points_outward=False)
+    left_x = float(left_profile[left_index])
+    left_y = float(row_ys[left_index])
+    right_x = float(right_profile[right_index])
+    right_y = float(row_ys[right_index])
+    if right_x <= left_x:
+        raise ValueError("Detected contact vertices do not form a valid surface line")
+
+    slope = (right_y - left_y) / (right_x - left_x)
+    image_center_x = (component.shape[1] - 1) / 2.0
+    center_y = left_y + slope * (image_center_x - left_x)
+    return SurfaceLine(center_y, math.degrees(math.atan(slope)))
+
+
+def estimate_surface_line_from_symmetry_frame(
     files: list[Path],
     background: np.ndarray,
     frame_number: int,
@@ -544,7 +569,8 @@ def estimate_surface_y_from_symmetry_frame(
     coarse_surface_y: int,
     config: AnalysisConfig,
     structure: np.ndarray,
-) -> int:
+    angle_override_deg: float | None = None,
+) -> SurfaceLine:
     matching_file = next(
         (path for path in files if frame_number_from_filename(path) == frame_number),
         None,
@@ -562,9 +588,33 @@ def estimate_surface_y_from_symmetry_frame(
                 "Could not find a droplet/reflection component in surface "
                 f"calibration frame {frame_number}"
             )
-        component, bbox = selected
-        surface_y, _error = estimate_vertical_symmetry_y(component, bbox)
-        return surface_y
+        component, _bbox = selected
+    else:
+        component, _bbox = selected
 
-    component, bbox = selected
-    return estimate_surface_y_from_waist(component, bbox, coarse_surface_y, config)
+    detected_line = estimate_contact_line(component)
+    if angle_override_deg is None:
+        return detected_line
+    return SurfaceLine(detected_line.center_y, float(angle_override_deg))
+
+
+def estimate_surface_y_from_symmetry_frame(
+    files: list[Path],
+    background: np.ndarray,
+    frame_number: int,
+    threshold: float,
+    coarse_surface_y: int,
+    config: AnalysisConfig,
+    structure: np.ndarray,
+) -> int:
+    line = estimate_surface_line_from_symmetry_frame(
+        files,
+        background,
+        frame_number,
+        threshold,
+        coarse_surface_y,
+        config,
+        structure,
+        angle_override_deg=0.0,
+    )
+    return line.center_y_int()

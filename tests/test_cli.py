@@ -31,6 +31,18 @@ class CliConfigTests(unittest.TestCase):
         self.assertEqual(config.min_foreground_delta, DEFAULT_MIN_FOREGROUND_DELTA)
         self.assertEqual(config.min_foreground_delta, 1500.0)
 
+    def test_surface_angle_is_automatic_unless_explicitly_overridden(self) -> None:
+        parser = build_parser()
+        automatic = config_from_args(parser.parse_args(["--surface-frame", "189"]))
+        overridden = config_from_args(
+            parser.parse_args(
+                ["--surface-frame", "189", "--surface-angle-deg", "1.25"]
+            )
+        )
+
+        self.assertIsNone(automatic.surface_angle_deg)
+        self.assertEqual(overridden.surface_angle_deg, 1.25)
+
 
 if __name__ == "__main__":
     unittest.main()

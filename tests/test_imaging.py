@@ -8,6 +8,7 @@ import numpy as np
 
 from droplet_impact_cv.imaging import (
     component_measurement,
+    estimate_contact_line,
     estimate_vertical_symmetry_y,
     foreground_mask,
     make_structure,
@@ -78,6 +79,25 @@ class ForegroundMaskTests(unittest.TestCase):
 
 
 class ComponentMeasurementTests(unittest.TestCase):
+    def test_overlay_is_clipped_at_surface_without_changing_contact_width(self) -> None:
+        mask = np.zeros((80, 100), dtype=np.uint8)
+        mask[30:60, 20:80] = 1
+        config = AnalysisConfig(
+            input_dir=Path("input"),
+            output_csv=Path("output.csv"),
+            min_area_px=1,
+            min_touch_pixels=1,
+            debug_dir=None,
+        )
+        surface_line = SurfaceLine(50.0, angle_deg=0.0)
+
+        measurement = component_measurement(mask, surface_line, config)
+
+        yy, xx = np.indices(measurement.mask.shape)
+        distance_from_surface = yy - surface_line.y_at(xx, measurement.mask.shape[1])
+        self.assertFalse(np.any(measurement.mask & (distance_from_surface > 0)))
+        self.assertEqual(measurement.diameter_px, 60.0)
+
     def test_bright_gap_open_at_surface_is_filled_as_droplet_interior(self) -> None:
         mask = np.zeros((80, 100), dtype=np.uint8)
         mask[30:55, 20:80] = 1
@@ -97,6 +117,36 @@ class ComponentMeasurementTests(unittest.TestCase):
 
 
 class SurfaceCalibrationTests(unittest.TestCase):
+    def test_contact_line_uses_outward_tips_without_reflection_lobes(self) -> None:
+        component = np.zeros((100, 180), dtype=bool)
+        row_ys = np.arange(20, 81)
+        left = 25 + np.abs(row_ys - 52)
+        right = 155 - np.abs(row_ys - 49)
+        for row_y, left_x, right_x in zip(row_ys, left, right):
+            component[row_y, left_x : right_x + 1] = True
+
+        line = estimate_contact_line(component)
+
+        expected_slope = (49 - 52) / (155 - 25)
+        self.assertAlmostEqual(line.slope, expected_slope, places=3)
+
+    def test_contact_line_uses_notches_between_reflection_lobes(self) -> None:
+        component = np.zeros((100, 180), dtype=bool)
+        row_ys = np.arange(20, 81)
+        left = np.interp(row_ys, [20, 35, 50, 65, 80], [55, 25, 40, 25, 55])
+        right = np.interp(
+            row_ys,
+            [20, 37, 52, 67, 80],
+            [115, 155, 140, 155, 115],
+        )
+        for row_y, left_x, right_x in zip(row_ys, left, right):
+            component[row_y, int(round(left_x)) : int(round(right_x)) + 1] = True
+
+        line = estimate_contact_line(component)
+
+        expected_slope = (52 - 50) / (140 - 40)
+        self.assertAlmostEqual(line.slope, expected_slope, places=3)
+
     def test_symmetric_component_can_be_selected_above_wrong_coarse_edge(self) -> None:
         mask = np.zeros((100, 120), dtype=np.uint8)
         for offset in range(-20, 21):
